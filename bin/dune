@@ -1,0 +1,7 @@
+(executable
+ (public_name jaysub)
+ (name main)
+ (libraries jaysub))
+(env
+  (dev
+    (flags (:standard -w -37-50-34-26))))

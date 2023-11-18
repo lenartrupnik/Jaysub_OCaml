@@ -1,0 +1,12 @@
+n, z, bit;
+
+procedure doublebit {
+  z += bit;
+  bit += z;
+  z -= bit/2;
+}
+
+procedure main {
+    n += 4;
+    call doublebit;
+}
