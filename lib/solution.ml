@@ -3,43 +3,82 @@ type store = (Ast.identifier * int) list
 
 let parse      = Parser.program Lexer.token (* Do not change *)
 
+let update_store (id : Ast.identifier) (value : int) (store : store) : store =
+  (id, value) :: List.remove_assoc id store
+  
 let string_of_store (store : store) : string =
   let pair_to_string (id, value) = id ^ ": " ^ string_of_int value in
   String.concat ", " (List.map pair_to_string store)
+
+let find_procedure_by_id (id : Ast.identifier) (procedures : Ast.procedure list) : Ast.statement list option =
+  let rec find_procedure_by_id_helper id = function
+  | [] -> None
+  | (proc_id, stmts) :: rest ->
+    if proc_id = id then
+      Some stmts
+    else
+      find_procedure_by_id_helper id rest
+  in
+  find_procedure_by_id_helper id procedures
+
+let eval_binop (op : Ast.binop) (v1 : int) (v2 : int) (forward : bool) : int =
+  match op with
+  | Ast.Plus -> if forward then v1 + v2 else v1 - v2
+  | Ast.Min -> if forward then v1 - v2 else v1 + v2
+  | Ast.Mult -> if forward then v1 * v2 else v1 / v2
+  | Ast.Div -> if forward then v1 / v2 else v1 * v2
+  | Ast.Eq -> if v1 = v2 then 1 else 0
+  | Ast.NEq -> if v1 <> v2 then 1 else 0
+
+let eval_expr (expr : Ast.expression) (store : store) (forward : bool) : int =
+  let rec eval (e : Ast.expression) (s : store) (fwd : bool) : int =
+    match e with
+    | Ast.Constant c -> c
+    | Ast.Ident id -> List.assoc id s
+    | Ast.Binop (e1, op, e2) ->
+      let v1 = eval e1 s fwd in
+      let v2 = eval e2 s fwd in
+      let result = eval_binop op v1 v2 fwd in
+      result
+  in
+  eval expr store forward
+    
 
 let rec feval(program: program) : store =
   match program with
   | _, [] -> failwith "No procedures found in the program"
   | _, procedures ->
     let initial_store = List.map (fun id -> (id, 0)) (fst program) in
-    let procedure_table = Hashtbl.create 10 in (* Create the procedure table *)
     Printf.printf "Initial Store: %s\n" (string_of_store initial_store);
+    execute_procedure (List.hd (List.rev procedures)) initial_store procedures true
 
-    (* Register procedures in the procedure_table *)
-    List.iter (fun (id, stmts) -> register_procedure procedure_table id stmts) procedures;
-
-    execute_procedure procedure_table (List.hd (List.rev procedures)) initial_store
-
-  and execute_procedure (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (procedure: Ast.procedure) (store : store) : store =
+    (*Execute the last procedure*)
+  and execute_procedure (procedure: Ast.procedure) (store : store) (all_procedures : Ast.procedure list) (forward : bool) : store =
     let proc_id, statements = procedure in
     Printf.printf "Executing procedure %s\n" proc_id;
-    execute_statements procedure_table statements store
-  
-  and execute_statements (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (statements : Ast.statement list) (store: store) : store =
+    if forward then
+      execute_statements statements store all_procedures true
+    else
+      execute_statements (List.rev statements) store all_procedures false
+    
+  and execute_statements (statements : Ast.statement list) (store: store) (all_procedures : Ast.procedure list) (forward : bool) : store =
     match statements with
     | [] -> store
     | statement :: rest ->
-      let new_store = execute_statement procedure_table statement store in
-      Printf.printf "Executing statement: %s\n" (Ast.show_statement statement);
-      Printf.printf "Current Store: %s\n" (string_of_store store);
-      execute_statements procedure_table rest new_store
-  
-  and execute_statement (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (statement : Ast.statement) (store : store) : store =
+      if forward then
+        let new_store = statement_execution statement store all_procedures true in
+        execute_statements rest new_store all_procedures true
+      else
+        let new_store = statement_execution statement store all_procedures false in
+        execute_statements rest new_store all_procedures false
+
+  and statement_execution (statement : Ast.statement) (store : store) (all_procedures : Ast.procedure list) (forward : bool) : store =
+    Printf.printf "Current Store: %s\n" (string_of_store store);
     match statement with
     | Ast.ModStmt (id, modi, expr) ->
       let current_value = List.assoc id store in
-      let result = eval_expr expr store in
-      let update_value = apply_binop modi current_value result in
+      let result = eval_expr expr store forward in
+      let update_value = eval_binop modi current_value result forward in
       update_store id update_value store
   
     | Ast.SwapStmt (id1, id2) ->
@@ -47,180 +86,70 @@ let rec feval(program: program) : store =
       let value2 = List.assoc id2 store in
       let updated_store = update_store id1 value2 (update_store id2 value1 store) in
       updated_store
-  
+
     | Ast.IfStmt (cond, then_stmts, else_stmts, assertion) ->
-      if eval_expr cond store <> 0 then
-        let updated_store = execute_statements procedure_table then_stmts store in
-        let assertion_value = eval_expr assertion updated_store in
-        if assertion_value <> 0 then
-          updated_store
-        else
-          failwith "Assertion failed after executing then-branch"
+      Printf.printf "Store at if stmt: %s\n" (string_of_store store);
+      if (forward && eval_expr cond store forward <> 0) || (not forward && eval_expr assertion store forward <> 0) then
+        begin
+          let updated_store = if forward then execute_statements then_stmts store all_procedures true
+                              else execute_statements (List.rev then_stmts) store all_procedures false in
+          Printf.printf "Updated store in then stmt: %s\n" (string_of_store updated_store);
+          if (forward && eval_expr assertion updated_store forward<> 0) || (not forward && eval_expr cond updated_store forward <> 0) then
+            updated_store
+          else
+            failwith "Assertion failed after executing then-branch"
+        end
       else
-        let updated_store = execute_statements procedure_table else_stmts store in
-        let assertion_value = eval_expr assertion updated_store in
-        if assertion_value <> 0 then
-          failwith "Assertion failed after executing else-branch"
-        else
-          updated_store
-  
+        begin
+          let updated_store = if forward then execute_statements else_stmts store all_procedures true
+                              else execute_statements (List.rev else_stmts) store all_procedures false in
+          Printf.printf "Updated store in else stmt: %s\n" (string_of_store updated_store);
+          if (forward && eval_expr assertion updated_store forward<> 0) || (not forward && eval_expr cond updated_store forward <> 0) then
+            failwith "Assertion failed after executing else-branch"
+          else
+            updated_store
+        end
+
     | Ast.CallStmt procedure_name ->
-      execute_procedure_call procedure_table procedure_name store
-  
+      execute_procedure_by_id procedure_name store all_procedures forward
+      
     | Ast.UncallStmt procedure_name ->
-      execute_inverse_procedure procedure_table procedure_name store
+      execute_procedure_by_id procedure_name store all_procedures (not forward)      
     
     | Ast.LoopStmt (assertion, loop_body, test) ->
-      execute_loop procedure_table assertion loop_body test store
+      loop_execution assertion loop_body test store all_procedures forward
     | _ -> failwith ("Unsupported statement type: " ^ Ast.show_statement statement)
-  
-  and execute_procedure_call (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (procedure_name : Ast.identifier) (store : store) : store =
-    match Hashtbl.find_opt procedure_table procedure_name with
-    | Some stmts -> execute_statements procedure_table stmts store
-    | None -> failwith ("Procedure not found: " ^ procedure_name)
 
-  and execute_inverse_procedure (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (procedure_name : Ast.identifier) (store : store) : store =
-    match Hashtbl.find_opt procedure_table procedure_name with
-    | Some stmts -> execute_statements procedure_table (List.rev stmts) store
-    | None -> failwith ("Procedure not found: " ^ procedure_name)
-    
-  and eval_expr (expr : Ast.expression) (store : store) : int =
-    let print_expr expr_str = Printf.printf "Evaluating expression: %s\n" expr_str in
-    match expr with
-    | Ast.Constant c -> print_expr (string_of_int c); c
-    | Ast.Ident id -> print_expr id; List.assoc id store
-    | Ast.Binop (e1, op, e2) ->
-      let v1 = eval_expr e1 store in
-      let v2 = eval_expr e2 store in
-      let result = apply_binop op v1 v2 in
-      print_expr (Ast.string_of_expression expr ^ " = " ^ string_of_int result);
-      result
-  and apply_binop (op : Ast.binop) (v1 : int) (v2 : int) : int =
-    match op with
-    | Ast.Plus -> v1 + v2
-    | Ast.Min -> v1 - v2
-    | Ast.Mult -> v1 * v2
-    | Ast.Div -> v1 / v2
-    | Ast.Eq -> if v1 = v2 then 1 else 0
-    | Ast.NEq -> if v1 <> v2 then 1 else 0
+  and execute_procedure_by_id (procedure_name : Ast.identifier) (store : store) (all_procedures : Ast.procedure list) (forward : bool) : store =
+      match find_procedure_by_id procedure_name all_procedures with
+      | Some stmts ->
+        let statements = if forward then stmts else List.rev stmts in
+        execute_statements statements store all_procedures forward
+      | None -> failwith ("Procedure not found: " ^ procedure_name)
 
-  and update_store (id : Ast.identifier) (value : int) (store : store) : store =
-    (id, value) :: List.remove_assoc id store
-
-  and register_procedure (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (name : Ast.identifier) (body : Ast.statement list) : unit =
-    Hashtbl.add procedure_table name body
-
-  and execute_loop (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (assertion : Ast.expression) (loop_body : Ast.statement list) (test : Ast.expression) (store : store) : store =
-    if eval_expr assertion store <> 0 then
+  and loop_execution (assertion : Ast.expression) (loop_body : Ast.statement list) (test : Ast.expression) (store : store) (all_procedures : Ast.procedure list) (forward : bool) : store =
+    if (forward && eval_expr assertion store forward<> 0) || (not forward && eval_expr test store forward<> 0) then
       let rec loop (store : store) : store =
-          let updated_store = execute_statements procedure_table loop_body store in
+          let updated_store = if forward then execute_statements loop_body store all_procedures true
+                              else execute_statements (List.rev loop_body) store all_procedures false in
           Printf.printf "Updated Store during loop: %s\n" (string_of_store updated_store); (* Print updated store *)
-          if eval_expr test updated_store == 0 then
+          if (forward && eval_expr test updated_store forward == 0) || (not forward && eval_expr assertion updated_store forward == 0) then
             loop updated_store
           else
             updated_store
         in
       loop store
-      else
-        failwith "Loop assertion failed initially"
-
+    else
+      failwith "Loop assertion failed initially"
 (*-----------------------------------------------------*)
-let rec beval(program: program) : store =
+
+let beval(program: program) : store =
   match program with
   | _, [] -> failwith "No procedures found in the program"
   | _, procedures ->
     let initial_store = List.map (fun id -> (id, 0)) (fst program) in
-    let procedure_table = Hashtbl.create 10 in (* Create the procedure table *)
     Printf.printf "Initial Store: %s\n" (string_of_store initial_store);
-
-    (* Register procedures in the procedure_table *)
-    List.iter (fun (id, stmts) -> register_procedure procedure_table id stmts) procedures;
-
-    execute_procedure procedure_table (List.hd procedures) initial_store
-
-  and execute_procedure (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (procedure: Ast.procedure) (store : store) : store =
-    let proc_id, statements = procedure in
-    Printf.printf "Executing procedure %s (backward)\n" proc_id;
-    execute_statements procedure_table (List.rev statements) store
-
-  and execute_statements (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (statements : Ast.statement list) (store: store) : store =
-    match statements with
-    | [] -> store
-    | statement :: rest ->
-      let new_store = execute_statement procedure_table statement store in
-      Printf.printf "Executing statement: %s (backward)\n" (Ast.show_statement statement);
-      Printf.printf "Current Store: %s\n" (string_of_store store);
-      execute_statements procedure_table rest new_store
-
-  and execute_statement (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (statement : Ast.statement) (store : store) : store =
-    match statement with
-    | Ast.ModStmt (id, modi, expr) ->
-      let current_value = List.assoc id store in
-      let result = eval_expr expr store in
-      let update_value = reverse_apply_binop modi current_value result in
-      update_store id update_value store
-
-    | Ast.SwapStmt (id1, id2) ->
-      let value1 = List.assoc id1 store in
-      let value2 = List.assoc id2 store in
-      let updated_store = update_store id1 value2 (update_store id2 value1 store) in
-      updated_store
-
-    | Ast.IfStmt (cond, then_stmts, else_stmts, assertion) ->
-      if eval_expr cond store <> 0 then
-        let updated_store = execute_statements procedure_table then_stmts store in
-        let assertion_value = eval_expr assertion updated_store in
-        if assertion_value <> 0 then
-          updated_store
-        else
-          failwith "Assertion failed after executing then-branch (backward)"
-      else
-        let updated_store = execute_statements procedure_table else_stmts store in
-        let assertion_value = eval_expr assertion updated_store in
-        if assertion_value <> 0 then
-          failwith "Assertion failed after executing else-branch (backward)"
-        else
-          updated_store
-
-    | Ast.CallStmt procedure_name ->
-      execute_procedure_call procedure_table procedure_name store
-
-    | Ast.UncallStmt procedure_name ->
-      execute_inverse_procedure procedure_table procedure_name store
-
-    | Ast.LoopStmt (assertion, loop_body, test) ->
-      execute_loop procedure_table assertion loop_body test store
-
-    | _ -> failwith ("Unsupported statement type: " ^ Ast.show_statement statement)
-
-  and reverse_apply_binop (op : Ast.binop) (result : int) (current_value : int) : int =
-    match op with
-    | Ast.Plus -> result - current_value
-    | Ast.Min -> current_value + result
-    | Ast.Mult -> if current_value = 0 then 0 else result / current_value
-    | Ast.Div -> if current_value = 0 then 0 else result * current_value
-    | Ast.Eq -> 1
-    | Ast.NEq -> 1
-
-  and update_store (id : Ast.identifier) (value : int) (store : store) : store =
-    (id, value) :: List.remove_assoc id store
-
-  and register_procedure (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (name : Ast.identifier) (body : Ast.statement list) : unit =
-    Hashtbl.add procedure_table name body
-
-  and execute_loop (procedure_table: (Ast.identifier, Ast.statement list) Hashtbl.t) (assertion : Ast.expression) (loop_body : Ast.statement list) (test : Ast.expression) (store : store) : store =
-    if eval_expr test store <> 0 then
-      let rec loop (store : store) : store =
-          let updated_store = execute_statements procedure_table loop_body store in
-          Printf.printf "Updated Store during loop: %s\n" (string_of_store updated_store); (* Print updated store *)
-          if eval_expr assertion updated_store == 0 then
-            loop updated_store
-          else
-            updated_store
-        in
-      loop store
-      else
-        failwith "Loop assertion failed initially"
+    execute_procedure (List.hd (List.rev procedures)) initial_store procedures false
         
 (*-----------------------------------------------------*)
 let invert     = fun _ -> failwith "implement me!"
