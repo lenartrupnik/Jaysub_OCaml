@@ -1,0 +1,37 @@
+n, x1, x2, x3;
+
+procedure fib {
+    if (n == 0) then {
+        x1 += 1;
+        x2 += 1;
+    } else {
+        n -= 1;
+        call fib;
+        x1 += x2;
+        x1 <=> x2;
+    } fi (x1 == x2)
+}
+
+procedure fun_1 {
+    x1 += x2 - x3;
+    x1 += x2;
+}
+
+procedure random_switch {
+    call fun_1;
+    x1 -= 2;
+    x1 <=> x2;
+    x3 += x2;
+}
+
+procedure main {
+    n += 2;
+    call fib;
+    x1 += 2;
+    n += 8;
+    call random_switch;
+    from (x1 == 3) do {
+        call random_switch;
+        call random_switch;
+    } until (x2 != 3)
+}
