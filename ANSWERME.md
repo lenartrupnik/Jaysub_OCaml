@@ -3,7 +3,7 @@
 
 | NAME                  | R NUMBER            | EMAIL ADDRESS |
 |-----------------------|---------------------|---------------|
-| <CHANGEME> FIRST LAST | <CHANGEME> R-000000 | <CHANGEME>    |
+| <CHANGEME> Lenart Rupnik | <CHANGEME> R-0977429 | <CHANGEME> rupnik.lenart@student.kuleuven.be    |
 
 #### Please mark the assignments that you wish to submit for grading with an 'X', following the example of 'Example assignment': 
 
