@@ -28,3 +28,7 @@ setup.log
 
 # Local OPAM switch
 _opam/
+lib/solution.ml
+.vscode/settings.json
+bin/utils.ml
+bin/main.ml
