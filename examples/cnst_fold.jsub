@@ -1,0 +1,23 @@
+n, x1, x2;
+
+procedure main {
+    x2 -= 12 * 0;
+    x1 += x2 + 4 + 5 + 0;
+    x1 += 4 + 5 + x2 + 0 + 4;
+    x1 += x2 - x2;
+    x1 += x2 / x2;
+    x1 += x2 * n * 0;
+    from (x2 == 3 + 5 * 2) do {
+        x1 += 2;
+        x3 -= 4 * 0 * x2;
+    } until (x2 == 3 - 5 + 7)
+    if (0 != 2 * 3 + 3) then {
+        x1 += 2;
+    } else {
+        n += 4;
+    } fi (x2 == x2)
+}
+
+procedure unmain {
+    call main;
+}

@@ -1,0 +1,34 @@
+n, x1, x2;
+
+procedure sth_1 {
+    x1 += 1;
+}
+
+procedure sth_2 {
+    x1 += 4;
+}
+
+procedure sth_3 {
+    x1 += 7;
+    x1 -= 7;
+}
+
+procedure sth_4 {
+    x2 += 4;
+}
+
+procedure main {
+    call sth_1;
+    uncall sth_1;
+    uncall sth_3;
+    if (0 != 0) then {
+        call sth_4;
+    } else {
+        call sth_3;
+        if (0 == 0) then {
+            call sth_3;
+            } else {
+                call sth_4;
+            } fi (x2 != x2)
+    } fi (x2 != x2)
+}
