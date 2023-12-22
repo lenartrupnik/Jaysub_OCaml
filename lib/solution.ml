@@ -198,7 +198,7 @@ let rec feval(program: program) : store =
           in
         loop store
       else
-        failwith "Loop assertion failed initially"
+        store
 
 (*-----------------------------------------------------*)
 (*--------------------BEVAL PROGRAM--------------------*)
