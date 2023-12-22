@@ -64,7 +64,7 @@ let eval_binop (op : Ast.binop) (v1 : int) (v2 : int) (forward : bool) : int =
 (** Evaluates an expression with new regards to given store.
   @param expr Expression to be evaluated.
   @param store Store used for the evaluation context.
-  @param forward Direction of evaluation (true for forward, false for backward).
+  @param forward Direction of evaluation.
   @return Integer result of the evaluation.
 *)
 let eval_expr (expr : Ast.expression) (store : store) (forward : bool) : int =
@@ -187,19 +187,29 @@ let rec feval(program: program) : store =
         | None -> failwith ("Procedure not found: " ^ procedure_name)
 
     and execute_loop (assertion : Ast.expression) (loop_body : Ast.statement list) (test : Ast.expression) (store : store) (all_procedures : Ast.procedure list) (forward : bool) : store =
-      if (forward && eval_expr assertion store forward<> 0) || (not forward && eval_expr test store forward <> 0) then
-        let rec loop (store : store) : store =
-            let updated_store = if forward then execute_statements loop_body store all_procedures true
-                            else execute_statements (List.rev loop_body) store all_procedures false in
-            if (forward && eval_expr test updated_store forward = 0) || (not forward && eval_expr assertion updated_store forward = 0) then
-              loop updated_store
+        let rec loop (store : store) (first_pass: bool): store =
+          if first_pass then
+            if (forward && eval_expr assertion store forward <> 0) || (not forward && eval_expr test store forward <> 0) then
+              let updated_store = if forward then execute_statements loop_body store all_procedures true
+                                  else execute_statements (List.rev loop_body) store all_procedures false in
+              if (forward && eval_expr test updated_store forward = 0) || (not forward && eval_expr assertion updated_store forward = 0) then
+                loop updated_store false
+              else
+                updated_store
+            else 
+              store
+          else
+            if (forward && eval_expr assertion store forward == 0) || (not forward && eval_expr test store forward == 0) then
+              let updated_store = if forward then execute_statements loop_body store all_procedures true
+                              else execute_statements (List.rev loop_body) store all_procedures false in
+              if (forward && eval_expr test updated_store forward = 0) || (not forward && eval_expr assertion updated_store forward = 0) then
+                loop updated_store false
+              else
+                updated_store
             else
-              updated_store
+              failwith "Assertion should only hold for the first iteration"
           in
-        loop store
-      else
-        store
-
+        loop store true
 (*-----------------------------------------------------*)
 (*--------------------BEVAL PROGRAM--------------------*)
 (*-----------------------------------------------------*)
@@ -285,6 +295,8 @@ let rec constant_fold_expr (expr: Ast.expression) : Ast.expression =
     begin match (e1', e2', op) with
       | (Ast.Constant c1', Ast.Constant c2', _) ->
           Ast.Constant (eval_binop op c1' c2' true)
+      (* Here is a little weird part where I try to implement (not the best) mathematical associative & commutative laws
+         Definitily could use some improvements*)
       | (Ast.Binop (left, Ast.Plus, Ast.Constant c1'), Ast.Constant c2', Ast.Plus) 
       | (Ast.Constant c1', Ast.Binop (Ast.Constant c2', Ast.Plus, left), Ast.Plus) ->
           constant_fold_expr (Ast.Binop (left, Ast.Plus, Ast.Constant (c1' + c2')))
@@ -512,8 +524,8 @@ let%test "feval basic functionality" =
   let store = feval program in
   B.List.Assoc.find store ~equal:String.equal "x" = Some 5
 
-let%test "feval loop functionality" =
-  let program = (["x"], [("main", [Ast.LoopStmt (Ast.Constant 1, [Ast.ModStmt ("x", Ast.Plus, Ast.Constant 1)], Ast.Binop (Ast.Ident "x", Ast.Eq, Ast.Constant 5))])]) in
+let%test "feval loop functionality V2" =
+  let program = (["x"], [("main", [Ast.LoopStmt (Ast.Binop(Ast.Ident "x", Ast.Eq, Ast.Constant 0), [Ast.ModStmt ("x", Ast.Plus, Ast.Constant 1)], Ast.Binop (Ast.Ident "x", Ast.Eq, Ast.Constant 5))])]) in
   let store = feval program in
   match List.find_opt (fun (id, _) -> id = "x") store with
   | Some (_, value) -> value = 5
@@ -570,7 +582,7 @@ let%test "beval reverses a complex program" =
        ("decrement_y", [Ast.ModStmt ("y", Ast.Min, Ast.Constant 1)]);
        ("main", [Ast.CallStmt "increment_x";
                 Ast.ModStmt ("i", Ast.Plus, Ast.Constant 3);
-                Ast.LoopStmt (Ast.Binop (Ast.Ident "i", Ast.NEq, Ast.Constant 0),
+                Ast.LoopStmt (Ast.Binop (Ast.Ident "i", Ast.Eq, Ast.Constant 3),
                              [Ast.CallStmt "decrement_y"; Ast.CallStmt "increment_x"; Ast.ModStmt ("i", Ast.Min, Ast.Constant 1)], 
                              Ast.Binop (Ast.Ident "i", Ast.Eq, Ast.Constant 0))]) ]) in
 
@@ -580,7 +592,7 @@ let%test "beval reverses a complex program" =
       ("decrement_y", [Ast.ModStmt ("y", Ast.Min, Ast.Constant 1)]);
       ("unmain", [Ast.LoopStmt (Ast.Binop (Ast.Ident "i", Ast.Eq, Ast.Constant 0),
                    [Ast.ModStmt ("i", Ast.Plus, Ast.Constant 1); Ast.UncallStmt "increment_x"; Ast.UncallStmt "decrement_y"], 
-                   Ast.Binop (Ast.Ident "i", Ast.NEq, Ast.Constant 0));
+                   Ast.Binop (Ast.Ident "i", Ast.Eq, Ast.Constant 3));
                  Ast.ModStmt ("i", Ast.Min, Ast.Constant 3);
                  Ast.UncallStmt "increment_x"]) ]) in
 
@@ -629,7 +641,6 @@ let%test "test feval on doublebit.jsub" =
   let lexbuf = Lexing.from_string program_str in
   let program = parse lexbuf in
   let final_store = feval program in
-  (* Add your test assertions here *)
   B.List.Assoc.find final_store ~equal:String.equal "z" = Some 0 &&
   B.List.Assoc.find final_store ~equal:String.equal "bit" = Some 0 &&
   B.List.Assoc.find final_store ~equal:String.equal "n" = Some 4
